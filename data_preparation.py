@@ -11,6 +11,54 @@ from torch_geometric.loader import DataLoader
 # -----------------------------
 # 数据加载与划分
 # -----------------------------
+import random
+import torch
+from torch_geometric.data import InMemoryDataset, Data
+
+class NodeEdgeMaskDataset(InMemoryDataset):
+    """
+    Node/Edge-level SSL 数据集：每个样本随机 mask 2 个节点和 2 条边，
+    输出 (x_masked, x_orig, edge_attr_masked, edge_attr_orig, edge_index, batch)
+    对应 Gao et al., MSDE 2024 节点/边级伪任务§2.3.1。
+    """
+    def __init__(self, base_dataset, device=None):
+        super().__init__(None, None)
+        self.base = base_dataset
+        self.device = device or torch.device('cpu')
+
+    def len(self):
+        return len(self.base)
+
+    def get(self, idx):
+        data = self.base.get(idx)  # Data(x, edge_index, edge_attr, [y])
+        # 原始特征
+        x_orig = data.x.clone().to(self.device)
+        e_orig = data.edge_attr.clone().to(self.device)
+
+        # 1) 节点 Mask：随机挑 2 个不同节点
+        x_masked = x_orig.clone()
+        N = x_masked.size(0)
+        if N >= 2:
+            nodes = random.sample(range(N), 2)
+            x_masked[nodes] = 0.0
+
+        # 2) 边 Mask：随机挑 2 条不同边
+        e_masked = e_orig.clone()
+        E = e_masked.size(0)
+        if E >= 2:
+            edges = random.sample(range(E), 2)
+            e_masked[edges] = 0.0
+
+        # 3) 返回一个新的 Data 对象
+        return Data(
+            x_masked=x_masked,
+            x_orig=x_orig,
+            edge_index=data.edge_index,
+            edge_attr_masked=e_masked,
+            edge_attr_orig=e_orig,
+            batch=getattr(data, 'batch', None)
+        )
+
 
 def make_smile_canonical(smile):
     """将 SMILES 转换为标准形式，避免重复"""
@@ -37,6 +85,7 @@ def add_extra_data(df_train, df_extra, target):
     df_extra['SMILES'] = df_extra['SMILES'].apply(make_smile_canonical)
     df_extra = df_extra.groupby('SMILES', as_index=False)[target].mean()
     cross_smiles = set(df_extra['SMILES']) & set(df_train['SMILES'])
+    print(f'cross_smiles: {len(cross_smiles)}')
     existing = set(df_train[df_train[target].notnull()]['SMILES'])
     cross_smiles -= existing
 
@@ -85,14 +134,14 @@ def load_and_split_data(
     else:
         print("  ⚠️ 未找到 Tg 来源1 数据")
 
-    # # 4. 增强 Tg 来源2
-    # tg2_path = os.path.join(extra_dir, 'data_tg3.xlsx')
-    # if os.path.exists(tg2_path):
-    #     df_tg2 = pd.read_excel(tg2_path).rename(columns={'Tg [K]': 'Tg'})
-    #     df_tg2['Tg'] = df_tg2['Tg'] - 273.15
-    #     train = add_extra_data(train, df_tg2, 'Tg')
-    # else:
-    #     print("  ⚠️ 未找到 Tg 来源2 数据")
+    # 4. 增强 Tg 来源2
+    tg2_path = os.path.join(extra_dir, 'data_tg3.xlsx')
+    if os.path.exists(tg2_path):
+        df_tg2 = pd.read_excel(tg2_path).rename(columns={'Tg [K]': 'Tg'})
+        df_tg2['Tg'] = df_tg2['Tg'] - 273.15
+        train = add_extra_data(train, df_tg2, 'Tg')
+    else:
+        print("  ⚠️ 未找到 Tg 来源2 数据")
 
     # 5. 增强 Density
     d_path = os.path.join(extra_dir, 'data_dnst1.xlsx')

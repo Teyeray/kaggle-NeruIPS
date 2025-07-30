@@ -2,7 +2,8 @@ import optuna
 import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
-
+from model import WDMPNN, NodeEdgeSSLModel
+from data_preparation import NodeEdgeMaskDataset, PolymerDataset, load_and_split_data
 def train_se_mask_epoch(model, loader, optimizer):
     model.train()
     total = 0
@@ -26,25 +27,43 @@ def objective_stage1(trial):
     encoder = WDMPNN(node_feat_dim, edge_feat_dim, hidden_dim, num_edge_layers=num_layers).to(device)
     model = NodeEdgeSSLModel(encoder).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    
-    # 数据加载
-    loader = DataLoader(dataset_nodeedge, batch_size=64, shuffle=True)
-    
-    # 简化训练：跑固定若干 epoch
-    best_loss = float("inf")
+
     for epoch in range(5):
-        loss = train_se_mask_epoch(model, loader, optimizer)
-        trial.report(loss, epoch)
+        total = 0
+        for batch in nodeedge_loader:
+            batch = batch.to(device)
+            node_pred, edge_pred = model(
+                batch.x_masked, batch.edge_index,
+                batch.edge_attr_masked, batch.batch
+            )
+            loss = (
+                F.mse_loss(node_pred, batch.x_orig) +
+                F.mse_loss(edge_pred, batch.edge_attr_orig)
+            )
+            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            total += loss.item() * batch.num_graphs
+        avg = total / len(nodeedge_loader.dataset)
+        trial.report(avg, epoch)
         if trial.should_prune():
             raise optuna.exceptions.TrialPruned()
-        best_loss = min(best_loss, loss)
-    
-    # 保存最优 encoder
-    torch.save(encoder.state_dict(), f"stage1_best_enc_trial{trial.number}.pt")
-    return best_loss
+
+    torch.save(encoder.state_dict(), f"stage1_enc_best_{trial.number}.pt")
+    return avg
+
+
+base_path = "neurips-open-polymer-prediction-2025"
+train_df, val_df, test_df = load_and_split_data(base_path)
+
+# 1) 构造只含结构（不含 y）的 base_dataset
+base_graph_ds = PolymerDataset(train_df, y_cols=[])
+
+# 2) 包装 Node/Edge SSL 数据集
+dataset_nodeedge = NodeEdgeMaskDataset(base_graph_ds, device=device)
+nodeedge_loader = DataLoader(dataset_nodeedge, batch_size=64, shuffle=True)
 
 # 启动 Stage1 的 Optuna 研究
-study1 = optuna.create_study(direction="minimize", pruner=optuna.pruners.MedianPruner())
+storage_uri = "sqlite:///stage1_optuna.db"
+study1 = optuna.create_study(direction="minimize", pruner=optuna.pruners.MedianPruner(), storage=storage_uri)
 study1.optimize(objective_stage1, n_trials=20)
 print("Stage1 best params:", study1.best_trial.params)
 
