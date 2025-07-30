@@ -85,14 +85,14 @@ def load_and_split_data(
     else:
         print("  ⚠️ 未找到 Tg 来源1 数据")
 
-    # 4. 增强 Tg 来源2
-    tg2_path = os.path.join(extra_dir, 'data_tg3.xlsx')
-    if os.path.exists(tg2_path):
-        df_tg2 = pd.read_excel(tg2_path).rename(columns={'Tg [K]': 'Tg'})
-        df_tg2['Tg'] = df_tg2['Tg'] - 273.15
-        train = add_extra_data(train, df_tg2, 'Tg')
-    else:
-        print("  ⚠️ 未找到 Tg 来源2 数据")
+    # # 4. 增强 Tg 来源2
+    # tg2_path = os.path.join(extra_dir, 'data_tg3.xlsx')
+    # if os.path.exists(tg2_path):
+    #     df_tg2 = pd.read_excel(tg2_path).rename(columns={'Tg [K]': 'Tg'})
+    #     df_tg2['Tg'] = df_tg2['Tg'] - 273.15
+    #     train = add_extra_data(train, df_tg2, 'Tg')
+    # else:
+    #     print("  ⚠️ 未找到 Tg 来源2 数据")
 
     # 5. 增强 Density
     d_path = os.path.join(extra_dir, 'data_dnst1.xlsx')
