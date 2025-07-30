@@ -219,55 +219,6 @@ class EnhancedWDMPNN(MessagePassing):
         # edge_attr: 边特征
         return self.message_layers[self.current_layer](torch.cat([x_j, edge_attr], dim=-1))
 
-class GraphTransformer(nn.Module):
-    """图Transformer模型作为备选"""
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers=4, num_heads=8, dropout=0.1):
-        super().__init__()
-        
-        self.node_encoder = nn.Linear(in_channels, hidden_channels)
-        self.edge_encoder = nn.Linear(5, hidden_channels)
-        
-        # Transformer层
-        self.transformer_layers = nn.ModuleList([
-            nn.TransformerEncoderLayer(
-                d_model=hidden_channels,
-                nhead=num_heads,
-                dim_feedforward=hidden_channels * 4,
-                dropout=dropout,
-                batch_first=True
-            ) for _ in range(num_layers)
-        ])
-        
-        # 输出头
-        self.graph_decoder = nn.Sequential(
-            nn.Linear(hidden_channels, hidden_channels // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_channels // 2, out_channels)
-        )
-        
-    def forward(self, x, edge_index, edge_attr, batch=None):
-        # 编码
-        x = self.node_encoder(x)
-        edge_attr = self.edge_encoder(edge_attr)
-        
-        # 构建邻接矩阵
-        num_nodes = x.size(0)
-        adj = torch.zeros(num_nodes, num_nodes, device=x.device)
-        adj[edge_index[0], edge_index[1]] = 1
-        
-        # 应用Transformer层
-        for layer in self.transformer_layers:
-            x = layer(x, src_key_padding_mask=None)
-        
-        # 图级别预测
-        if batch is not None:
-            # 池化
-            graph_features = global_mean_pool(x, batch)
-        else:
-            graph_features = x.mean(dim=0, keepdim=True)
-        
-        return self.graph_decoder(graph_features)
-
 def create_enhanced_graph_from_smiles(smiles):
     """创建增强的图数据"""
     from rdkit import Chem
