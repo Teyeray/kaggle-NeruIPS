@@ -50,14 +50,16 @@ class NodeEdgeMaskDataset(InMemoryDataset):
             e_masked[edges] = 0.0
 
         # 3) 返回一个新的 Data 对象
-        return Data(
-            x_masked=x_masked,
-            x_orig=x_orig,
-            edge_index=data.edge_index,
-            edge_attr_masked=e_masked,
-            edge_attr_orig=e_orig,
-            batch=getattr(data, 'batch', None)
-        )
+        data_out = Data(
+                        x=x_masked,
+                        x_masked=x_masked,
+                        x_orig=x_orig,
+                        edge_index=data.edge_index,
+                        edge_attr_masked=e_masked,
+                        edge_attr_orig=e_orig,
+                        batch=getattr(data, 'batch', None)
+                    )
+        return data_out
 
 
 def make_smile_canonical(smile):
