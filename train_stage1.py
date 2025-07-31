@@ -94,6 +94,20 @@ study1 = optuna.create_study(
     storage=storage_uri,
     load_if_exists=True,
 )
-study1.optimize(objective_stage1, show_progress_bar=True, n_trials=20)
+#study1.optimize(objective_stage1, show_progress_bar=True, n_trials=20)
 
 print("Stage1 best params:", study1.best_trial.params)
+best_trial = study1.best_trial
+best_params = best_trial.params
+best_params["trial_number"] = best_trial.number
+
+# 保存权重为统一名称（而不是 trial 编号）
+torch.save(
+    torch.load(f"stage1_encoder_trial{best_trial.number}.pt"),
+    "stage1_encoder_best.pt"
+)
+
+# 保存超参数 dict，包括 trial_number
+torch.save(best_params, "stage1_best_params.pt")
+print("✅ 已保存最佳 encoder 权重 → stage1_encoder_best.pt")
+print("✅ 已保存最佳参数字典    → stage1_best_params.pt")

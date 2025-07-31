@@ -8,16 +8,23 @@ from torch_geometric.loader import DataLoader
 from model import WDMPNN, GraphSSLModel
 from data_preparation import load_and_split_data, PolymerDataset
 
-def compute_ensemble_M(data):
+from rdkit import Chem
+from rdkit.Chem import Descriptors
+
+def add_pseudo_label(dataset):
     """
-    计算论文 §2.3.2 中的 ensemble molecular weight，
-    这里假设 data.y 存着每个 node 所属 monomer 的分子量，
-    data.batch 存图索引，data.x 里没有分子量，我们需要自己预先
-    在 Data 对象里添加 pseudo 属性。此处仅示意：
+    对每个 Data 计算 graph-level pseudo label：ensemble molecular weight
+    并动态添加 data.pseudo 属性
     """
-    # pseudo = torch.randn((data.num_graphs, 1), device=data.x.device)
-    # 实际用法要根据你的数据结构来写
-    return data.pseudo  # 在构建 Dataset 时就把 pseudo label 放入 Data.pseudo
+    for data in dataset:
+        smiles = data.smiles if hasattr(data, 'smiles') else None
+        if smiles is None:
+            # 临时 fallback，用原子质量粗略估算
+            mol_weight = data.x[:, 0].sum().item()
+        else:
+            mol = Chem.MolFromSmiles(smiles)
+            mol_weight = Descriptors.MolWt(mol) if mol is not None else data.x[:, 0].sum().item()
+        data.pseudo = torch.tensor([mol_weight], dtype=torch.float)
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -28,7 +35,8 @@ def main():
     base_graph_ds = PolymerDataset(train_df, y_cols=[])   # 不需要 y
 
     # 在构建 Data 时，务必将 ensemble pseudo label 存到 Data.pseudo
-    # 这里假设 PolymerDataset 已经在 Data 对象上加了 pseudo
+    # 添加 pseudo label（ensemble molecular weight）
+    add_pseudo_label(base_graph_ds)
 
     graph_loader = DataLoader(base_graph_ds, batch_size=64, shuffle=True)
 
@@ -41,7 +49,7 @@ def main():
         hidden_dim=best["hidden_dim"],
         num_edge_layers=best["num_edge_layers"]
     ).to(device)
-    encoder.load_state_dict(torch.load(f"stage1_encoder_trial{best['trial_number']}.pt"))
+    encoder.load_state_dict(torch.load("stage1_encoder_best.pt"))
 
     # 3) 构建 GraphSSLModel（不 freeze encoder）
     model2 = GraphSSLModel(encoder, mlp_hidden_dim=best["hidden_dim"] // 2).to(device)
@@ -54,7 +62,7 @@ def main():
         total_loss = 0
         for data in graph_loader:
             data = data.to(device)
-            pseudo = compute_ensemble_M(data)               # [batch_size,1]
+            pseudo = data.pseudo.to(device).view(-1, 1)               # [batch_size,1]
             pred   = model2(
                 data.x,
                 data.edge_index,

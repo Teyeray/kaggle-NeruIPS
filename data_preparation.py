@@ -197,6 +197,16 @@ def create_graph_from_smiles(smiles):
         torch.tensor(edge_attr, dtype=torch.float)
     )
 
+def smiles_to_data(smiles, device=None):
+    x, edge_index, edge_attr = create_graph_from_smiles(smiles)
+    if x is None:
+        raise ValueError("Invalid SMILES")
+    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+    data.edge_weight = torch.ones(edge_attr.size(0))
+    data.batch = torch.zeros(x.size(0), dtype=torch.long)
+    return data.to(device or torch.device('cpu'))
+
+
 class PolymerDataset(InMemoryDataset):
     """基于 DataFrame 的 PyG InMemoryDataset"""
     def __init__(self, df: pd.DataFrame, y_cols: list, transform=None):

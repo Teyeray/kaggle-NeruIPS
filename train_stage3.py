@@ -1,96 +1,147 @@
-# stage3_finetune.py
-
+#stage3 -fine tune
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 
 from model import WDMPNN, GraphPredictor
-from data_preparation import load_and_split_data, PolymerDataset
+from data_preparation import PolymerDataset
 
-def freeze_parameters(module):
-    for p in module.parameters():
-        p.requires_grad = False
+from data_preparation import load_and_split_data, smiles_to_data
 
-def main(transfer_strategy: str = "c"):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+def prepare_property_datasets(properties, base_path="neurips-open-polymer-prediction-2025"):
+    """
+    加载原始 train/val/test，并为每个属性返回清洗好的 DataFrame。
+    返回值示例：
+    {
+      "Tg": {"train": train_clean_df, "val": val_clean_df, "test": test_clean_df},
+      "FFV": { ... },
+      ...
+    }
+    """
+    train_df, val_df, test_df = load_and_split_data(base_path)
+    result = {}
+    for prop in properties:
+        train_clean = train_df[["SMILES", prop]].dropna().reset_index(drop=True)
+        val_clean   = val_df[  ["SMILES", prop]].dropna().reset_index(drop=True)
+        test_clean  = test_df[ ["SMILES", prop]].dropna().reset_index(drop=True)
+        result[prop] = {
+            "train": train_clean,
+            "val":   val_clean,
+            "test":  test_clean
+        }
+    return result
+    
+def finetune_property(
+    train_df,
+    val_df,
+    property_name: str,
+    best_params_path: str = "stage1_best_params.pt",
+    stage2_encoder_path: str = "stage2_encoder.pt",
+    stage2_predictor_path: str = "stage2_predictor.pt",
+    output_dir: str = "stage3_heads",
+    device: torch.device = None,
+    num_epochs: int = 50,
+    batch_size: int = 64,
+    patience: int = 10
+):
+    # 设备选择
+    device = device or (torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
 
-    # 1) 加载有标签的 train/val
-    base_path = "neurips-open-polymer-prediction-2025"
-    train_df, val_df, _ = load_and_split_data(base_path)
-    y_cols = ['Tg','Tc','Density']
-    train_ds = PolymerDataset(train_df, y_cols=y_cols)
-    val_ds   = PolymerDataset(val_df,   y_cols=y_cols)
-    train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
-    val_loader   = DataLoader(val_ds,   batch_size=64, shuffle=False)
+    # 准备数据集
+    train_ds = PolymerDataset(train_df, y_cols=[property_name])
+    val_ds   = PolymerDataset(val_df,   y_cols=[property_name])
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
 
-    # 2) 恢复 Stage1 最佳超参及 Stage2 权重
-    best = torch.load("stage1_best_params.pt")  # dict 包含 hidden_dim, num_edge_layers, lr
-    encoder = WDMPNN(
-        node_feat_dim=2,
-        edge_feat_dim=1,
-        hidden_dim=best["hidden_dim"],
-        num_edge_layers=best["num_edge_layers"]
-    ).to(device)
-    encoder.load_state_dict(torch.load("stage2_encoder.pt"))
+    # 加载 stage1 超参 & stage2 模型
+    best = torch.load(best_params_path)
+    encoder = WDMPNN(2, 1, best["hidden_dim"], best["num_edge_layers"]).to(device)
+    encoder.load_state_dict(torch.load(stage2_encoder_path))
+    predictor = GraphPredictor(encoder.hidden_dim, best["hidden_dim"]//2, 1).to(device)
+    predictor.load_state_dict(torch.load(stage2_predictor_path))
 
-    predictor = GraphPredictor(
-        hidden_dim=encoder.hidden_dim,
-        mlp_hidden_dim=best["hidden_dim"]//2,
-        output_dim=encoder.hidden_dim
-    ).to(device)
-    if transfer_strategy in ("b","c"):
-        predictor.load_state_dict(torch.load("stage2_predictor.pt"))
+    # 下游 head
+    downstream = nn.Sequential(nn.Linear(1,32), nn.ReLU(), nn.Linear(32,1)).to(device)
 
-    # 3) 根据策略冻结
-    freeze_parameters(encoder)
-    if transfer_strategy=="a":
-        freeze_parameters(predictor)
-    elif transfer_strategy=="b":
-        # 只开放最后一层
-        for name,p in predictor.named_parameters():
-            if "2" not in name:
-                p.requires_grad=False
-    elif transfer_strategy=="c":
-        freeze_parameters(predictor)
-    else:
-        raise ValueError
+    # 全量微调
+    optim = torch.optim.Adam(
+        list(encoder.parameters())+
+        list(predictor.parameters())+
+        list(downstream.parameters()),
+        lr=best.get("lr",1e-3)
+    )
 
-    # 4) 新建下游 head
-    downstream = nn.Sequential(
-        nn.Linear(encoder.hidden_dim, 128),
-        nn.ReLU(),
-        nn.Linear(128, len(y_cols))
-    ).to(device)
+    best_val_mae = float('inf')
+    no_improve = 0
 
-    # 5) optimizer 只优化 downstream
-    optim = torch.optim.Adam(downstream.parameters(), lr=1e-3)
+    for epoch in range(1, num_epochs+1):
+        # —— 训练一步 —— 
+        encoder.train(); predictor.train(); downstream.train()
 
-    # 6) 训练
-    for epoch in range(1, 101):
-        downstream.train()
-        tot=0.0
+        total_abs_error = 0.0
+        total_mse_loss = 0.0
         for data in train_loader:
             data = data.to(device)
-            # 先 encoder -> predictor (可选)
-            h = encoder(
-                data.x, data.edge_index, data.edge_attr,
-                torch.ones(data.edge_attr.size(0),device=device),
-                data.batch
-            )
-            if transfer_strategy in ("b","c"):
-                h = predictor(h)
+            h = encoder(data.x, data.edge_index, data.edge_attr,
+                        torch.ones(data.edge_attr.size(0),device=device),
+                        data.batch)
+            h = predictor(h).view(-1,1)
             out = downstream(h)
-            y = torch.stack([data[c] for c in y_cols], dim=1)
+            y = data.y.view(-1,1)
             loss = F.mse_loss(out, y)
             optim.zero_grad(); loss.backward(); optim.step()
-            tot += loss.item()*data.num_graphs
+            total_mse_loss   += loss.item() * data.num_graphs
+            total_abs_error  += torch.abs(out - y).sum().item()
+        train_mse = total_mse_loss / len(train_loader.dataset)
+        train_mae = total_abs_error  / len(train_loader.dataset)
 
-        rmse = torch.sqrt(torch.tensor(tot/len(train_loader.dataset)))
-        print(f"[Stage3:{transfer_strategy}] epoch={epoch:03d} train_RMSE={rmse:.4f}")
+        # —— 验证集评估 —— 
+        encoder.eval(); predictor.eval(); downstream.eval()
+        val_mse_loss = 0.0
+        val_abs_error = 0.0
+        with torch.no_grad():
+            for data in val_loader:
+                data = data.to(device)
+                h = predictor(encoder(data.x, data.edge_index, data.edge_attr,
+                                      torch.ones(data.edge_attr.size(0),device=device),
+                                      data.batch)).view(-1,1)
+                out = downstream(h)
+                y = data.y.view(-1,1)
+                val_mse_loss  += F.mse_loss(out, y, reduction='sum').item()
+                val_abs_error += torch.abs(out - y).sum().item()
 
-    # 7) 保存
-    torch.save(downstream.state_dict(), f"stage3_head_{transfer_strategy}.pt")
+        val_mse = val_mse_loss / len(val_loader.dataset)
+        val_mae = val_abs_error / len(val_loader.dataset)
 
-if __name__=="__main__":
-    main(transfer_strategy="c")
+        print(f"[{property_name}] Epoch {epoch:03d} Train MSE={train_mse:.4f}, MAE={train_mae:.4f}, Val   MSE={val_mse:.4f}, MAE={val_mae:.4f}")
+
+        # —— 早停判断 —— 
+        if val_mae < best_val_mae - 1e-4:
+            best_val_mae = val_mae
+            no_improve = 0
+            # 保存当前最优 head
+            best_state = downstream.state_dict()
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                print(f"Early stopping at epoch {epoch} (no val improvement in {patience} epochs)")
+                break
+
+    # 保存在验证集上最优的 downstream head
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 1) 保存最优 downstream head
+    torch.save(best_state,
+               os.path.join(output_dir, f"downstream_{property_name}.pt"))
+
+    # 2) 保存微调后的 encoder
+    torch.save(encoder.state_dict(),
+               os.path.join(output_dir, f"encoder_ft_{property_name}.pt"))
+
+    # 3) 保存微调后的 predictor
+    torch.save(predictor.state_dict(),
+               os.path.join(output_dir, f"predictor_ft_{property_name}.pt"))
+
+    print(f"Saved head & encoder & predictor for {property_name} in {output_dir}")
