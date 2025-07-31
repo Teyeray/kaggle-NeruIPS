@@ -153,6 +153,17 @@ def load_and_split_data(
     else:
         print("  ⚠️ 未找到 Density 外部数据")
 
+    # 6. 增强 FFV
+    new_path = os.path.join(base_path, 'train_supplement')
+    ffv_path = os.path.join(new_path, 'dataset4.csv')
+    if os.path.exists(ffv_path):
+        df_ffv = pd.read_csv(ffv_path)
+        df_ffv = df_ffv.rename(columns={'FFV': 'FFV'})[['SMILES', 'FFV']]
+        train = add_extra_data(train, df_ffv, 'FFV')
+        print(f'add dataset4: {len(train)}')    
+    else:
+        print("  ⚠️ 未找到 FFV 外部数据")
+
     # 6. 划分数据集
     print("👉 划分 train / validation / test")
     train_df, temp_df = train_test_split(train, test_size=test_size, random_state=random_state)
