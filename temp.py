@@ -14,6 +14,7 @@ from rdkit.Chem import Descriptors
 from model import WDMPNN, GraphSSLModel
 from data_preparation import load_and_split_data, PolymerDataset, get_data_paths
 
+
 def weighted_mae(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -27,20 +28,25 @@ def weighted_mae(
         return diff.mean()
     return (weight * diff).sum() / weight.sum()
 
+
 def add_pseudo_label(dataset):
     """为数据集添加graph-level伪标签（分子量）"""
     for data in dataset:
+        # 如果Data对象中包含'smiles'属性，则使用它；否则，无法从data对象获取smiles，推荐在构造时添加
         smiles = getattr(data, 'smiles', None)
         if smiles:
             mol = Chem.MolFromSmiles(smiles)
             mol_weight = Descriptors.MolWt(mol) if mol else None
-        
+        else:
+            mol_weight = None
+
         # 回退方案：使用原子质量求和
-        if not smiles or mol_weight is None:
+        if mol_weight is None:
             mol_weight = data.x[:, 0].sum().item()
             print(f"Warning: Invalid SMILES '{smiles}', using atom mass sum as pseudo label.")
         data.pseudo = torch.tensor([mol_weight], dtype=torch.float)
     return dataset
+
 
 def prepare_stage2_data(
     train_df,
@@ -49,9 +55,11 @@ def prepare_stage2_data(
 ) -> Tuple[PolymerDataset, DataLoader]:
     """准备Stage2数据（复用Stage1的数据结构）"""
     dataset = PolymerDataset(train_df, y_cols=[])
+    # 如果需要Data对象携带SMILES，可在PolymerDataset中添加
     dataset = add_pseudo_label(dataset)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
     return dataset, loader
+
 
 def create_stage2_model_from_stage1(
     stage1_model_path: str,
@@ -59,23 +67,33 @@ def create_stage2_model_from_stage1(
     freeze_encoder: bool = True,
     device: torch.device = None
 ) -> Tuple[GraphSSLModel, Dict]:
-    
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(stage1_model_path, map_location=device)
-    stage1_params = checkpoint["params"]
+    stage1_params = checkpoint.get("params", {})
+
+    # 保持与Stage1相同的节点/边特征维度
+    node_dim = 10
+    edge_dim = 4
+    hidden_dim = stage1_params.get("hidden_dim")
+    num_edge_layers = stage1_params.get("num_edge_layers")
 
     encoder = WDMPNN(
-        node_feat_dim=10,
-        edge_feat_dim=4,
-        hidden_dim=stage1_params["hidden_dim"],
-        num_edge_layers=stage1_params["num_edge_layers"]
+        node_feat_dim=node_dim,
+        edge_feat_dim=edge_dim,
+        hidden_dim=hidden_dim,
+        num_edge_layers=num_edge_layers
     ).to(device)
     encoder.load_state_dict(checkpoint["encoder_state_dict"])
-    encoder.eval() if freeze_encoder else encoder.train()
+    if freeze_encoder:
+        encoder.eval()
+    else:
+        encoder.train()
 
+    # 构造GraphSSL模型
     mlp_hidden_dims = [predictor_params["predictor_hidden_dim"]] * predictor_params["predictor_num_layers"]
     model = GraphSSLModel(encoder=encoder, mlp_hidden_dims=mlp_hidden_dims).to(device)
     return model, stage1_params
+
 
 def train_stage2_model(
     model,
@@ -91,7 +109,6 @@ def train_stage2_model(
     """
     训练Stage2模型，使用加权MAE作为损失函数
     """
-    
     best_loss = float('inf')
     best_model = None
     epochs_no_improve = 0
@@ -144,17 +161,19 @@ def train_stage2_model(
         model.load_state_dict(best_model)
     return best_loss, model
 
+
 def save_stage2_artifacts_optuna(study, tmp_dir: str, output_dir: str):
-    
-    best_params = study.best_trial.user_attrs["full_params"]
+    best_params = study.best_trial.user_attrs.get("full_params", {})
     n = study.best_trial.number
     os.makedirs(output_dir, exist_ok=True)
 
+    # 保存超参和权重
     torch.save(best_params, os.path.join(output_dir, f"stage2_best_params_trial{n}.pt"))
     shutil.move(os.path.join(tmp_dir, f"encoder_trial{n}.pt"), os.path.join(output_dir, "stage2_encoder.pt"))
     shutil.move(os.path.join(tmp_dir, f"predictor_trial{n}.pt"), os.path.join(output_dir, "stage2_predictor.pt"))
     shutil.rmtree(tmp_dir)
     print(f"✅ Best Stage2 model (trial {n}) saved to {output_dir}")
+
 
 def optimize_stage2(
     train_df,
@@ -165,7 +184,6 @@ def optimize_stage2(
     tmp_dir="tmp_stage2",
     output_dir="stage2_artifacts"
 ):
-    
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     _, loader = prepare_stage2_data(train_df)
@@ -200,7 +218,6 @@ def optimize_stage2(
 
         torch.save(model.encoder.state_dict(), os.path.join(tmp_dir, f"encoder_trial{trial.number}.pt"))
         torch.save(model.predictor.state_dict(), os.path.join(tmp_dir, f"predictor_trial{trial.number}.pt"))
-
         return best_loss
 
     study = optuna.create_study(
@@ -214,6 +231,7 @@ def optimize_stage2(
     save_stage2_artifacts_optuna(study, tmp_dir, output_dir)
     return study
 
+
 def train_final_stage2_model(
     train_df,
     stage1_model_path: str = "stage1_artifacts/final_stage1_model.pth",
@@ -224,36 +242,18 @@ def train_final_stage2_model(
     patience: int = 15,
     min_delta: float = 1e-4
 ) -> torch.nn.Module:
-    """
-    使用最佳超参重新训练完整的 Stage2 模型，并保存 encoder + predictor + params
-
-    Args:
-        train_df: 训练数据
-        stage1_model_path: Stage1 模型路径
-        best_params_path: Stage2 超参数路径（默认为 artifacts 文件夹中最新的）
-        output_dir: 输出目录
-        freeze_encoder: 是否冻结 encoder
-        n_epochs: 最大训练轮次
-        patience: 早停轮数
-        min_delta: 最小改进
-
-    Returns:
-        训练好的模型
-    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1. 加载最佳超参
     if best_params_path is None:
         param_files = [f for f in os.listdir("stage2_artifacts") if f.startswith("stage2_best_params")]
         if not param_files:
             raise FileNotFoundError("No stage2_best_params file found in stage2_artifacts/")
         best_params_path = os.path.join("stage2_artifacts", sorted(param_files)[-1])
-    
+
     params = torch.load(best_params_path)
     print(f"✅ Loaded best stage2 params from {best_params_path}")
 
-    # 2. 构建模型和数据
     model, _ = create_stage2_model_from_stage1(
         stage1_model_path=stage1_model_path,
         predictor_params=params,
@@ -263,7 +263,6 @@ def train_final_stage2_model(
     _, loader = prepare_stage2_data(train_df)
     optimizer = torch.optim.Adam(model.parameters(), lr=params["lr"])
 
-    # 3. 训练
     best_loss, model = train_stage2_model(
         model=model,
         optimizer=optimizer,
@@ -276,7 +275,7 @@ def train_final_stage2_model(
         verbose=True
     )
 
-    # 4. 保存模型和超参
+    # 保存模型和超参
     torch.save(params, os.path.join(output_dir, "final_stage2_params.pt"))
     torch.save(model.encoder.state_dict(), os.path.join(output_dir, "final_stage2_encoder.pt"))
     torch.save(model.predictor.state_dict(), os.path.join(output_dir, "final_stage2_predictor.pt"))

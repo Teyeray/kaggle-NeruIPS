@@ -113,20 +113,28 @@ class NodeEdgeSSLModel(nn.Module):
 
 class GraphPredictor(nn.Module):
     """
-    图级 MLP 预测头，用于图级 SSL 或下游任务
-    输入：图表征 [batch_size, hidden_dim]
-    输出：伪标签或下游标签 [batch_size, output_dim]
+    图级 MLP 预测头，结构可调用于 Optuna 超参搜索。
+    
+    Args:
+        hidden_dim (int): 输入维度（来自 encoder）
+        mlp_hidden_dims (List[int]): 每一层的隐藏维度列表
+        output_dim (int): 输出维度（默认 1）
     """
     def __init__(self,
                  hidden_dim: int,
-                 mlp_hidden_dim: int,
+                 mlp_hidden_dims: list,
                  output_dim: int = 1):
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(hidden_dim, mlp_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(mlp_hidden_dim, output_dim)
-        )
+
+        layers = []
+        in_dim = hidden_dim
+        for hidden in mlp_hidden_dims:
+            layers.append(nn.Linear(in_dim, hidden))
+            layers.append(nn.ReLU())
+            in_dim = hidden
+
+        layers.append(nn.Linear(in_dim, output_dim))
+        self.mlp = nn.Sequential(*layers)
 
     def forward(self, graph_repr: torch.Tensor):
         return self.mlp(graph_repr)
@@ -139,12 +147,12 @@ class GraphSSLModel(nn.Module):
     """
     def __init__(self,
                  encoder: WDMPNN,
-                 mlp_hidden_dim: int):
+                 mlp_hidden_dims: list):
         super().__init__()
         self.encoder = encoder
         self.predictor = GraphPredictor(
             hidden_dim=encoder.hidden_dim,
-            mlp_hidden_dim=mlp_hidden_dim,
+            mlp_hidden_dims=mlp_hidden_dims,  
             output_dim=1
         )
 

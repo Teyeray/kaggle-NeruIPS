@@ -10,7 +10,7 @@ from data_preparation import PolymerDataset
 
 from data_preparation import load_and_split_data, smiles_to_data, get_data_paths
 
-def prepare_property_datasets(properties, paths=None):
+def prepare_property_datasets(properties, train_df, val_df, test_df):
     """
     加载原始 train/val/test，并为每个属性返回清洗好的 DataFrame。
     返回值示例：
@@ -24,10 +24,6 @@ def prepare_property_datasets(properties, paths=None):
         properties: 要处理的属性列表
         paths: 数据路径字典，如果为None则使用get_data_paths()获取
     """
-    if paths is None:
-        paths = get_data_paths()
-    
-    train_df, val_df, test_df = load_and_split_data(paths)
     result = {}
     for prop in properties:
         train_clean = train_df[["SMILES", prop]].dropna().reset_index(drop=True)
@@ -44,9 +40,8 @@ def finetune_property(
     train_df,
     val_df,
     property_name: str,
-    best_params_path: str = "stage1_best_params.pt",
-    stage2_encoder_path: str = "stage2_encoder.pt",
-    stage2_predictor_path: str = "stage2_predictor.pt",
+    stage1_model_path: str = "final_stage1_model.pth",
+    stage2_model_path: str = "stage2_artifacts/stage2_full_model.pth",
     output_dir: str = "stage3_heads",
     device: torch.device = None,
     num_epochs: int = 50,

@@ -1,13 +1,29 @@
 import optuna
 import torch
 import shutil
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 import os
 
+import sys
+sys.path.append("kaggle/input/polymer_pipeline")
 from model import WDMPNN, NodeEdgeSSLModel
 from data_preparation import PolymerDataset, NodeEdgeMaskDataset
+
+# 1) 通用加权 MAE
+def weighted_mae(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    weight: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    计算加权 MAE：mean(abs(pred - target)) 或者 sum(weight * abs(pred-target)) / sum(weight)
+    """
+    diff = torch.abs(pred - target)
+    if weight is None:
+        return diff.mean()
+    return (weight * diff).sum() / weight.sum()
 
 def setup_stage1_data(train_df):
     """
@@ -43,8 +59,8 @@ def create_stage1_model(params, device):
     hidden_dim = params["hidden_dim"]
     n_layers = params["num_edge_layers"]
     
-    encoder = WDMPNN(2, 1, hidden_dim, n_layers).to(device)
-    model = NodeEdgeSSLModel(encoder, node_feat_dim=2, edge_feat_dim=1).to(device)
+    encoder = WDMPNN(10, 4, hidden_dim, n_layers).to(device)
+    model = NodeEdgeSSLModel(encoder, node_feat_dim=10, edge_feat_dim=4).to(device)
 
     return encoder, model
 
@@ -57,9 +73,10 @@ def train_stage1_model(
     patience: int = 15,
     min_delta: float = 1e-3,
     trial: optuna.Trial = None,
+    verbose: bool = True  # 新增控制打印的参数
 ) -> Tuple[float, torch.nn.Module]:
     """
-    训练Stage1模型
+    训练Stage1模型（带完整训练日志）
     
     Args:
         model: 要训练的模型
@@ -70,14 +87,23 @@ def train_stage1_model(
         patience: 早停耐心值
         min_delta: 最小改进阈值
         trial: Optuna Trial对象(可选)
+        verbose: 是否打印训练进度
     
     Returns:
-        tuple: (best_loss, best_model)
+        tuple: (best_loss, trained_model)
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     best_loss = float('inf')
     best_model = None
     no_improve = 0
+    history = []  # 记录损失历史
+
+    # 训练头部分隔线
+    if verbose:
+        header = f"{'Epoch':<8}{'Loss':<12}{'Improvement':<12}{'Status':<10}"
+        print("-" * len(header))
+        print(header)
+        print("-" * len(header))
 
     for epoch in range(1, max_epochs + 1):
         model.train()
@@ -85,41 +111,62 @@ def train_stage1_model(
 
         for batch in dataloader:
             batch = batch.to(device)
+            optimizer.zero_grad()
             node_pred, edge_pred = model(
                 batch.x_masked,
                 batch.edge_index,
                 batch.edge_attr_masked,
                 batch.batch
             )
-            loss = (
-                F.mse_loss(node_pred, batch.x_orig) +
-                F.mse_loss(edge_pred, batch.edge_attr_orig)
-            )
-            optimizer.zero_grad()
+            node_loss = weighted_mae(node_pred, batch.x_orig) 
+            edge_loss = weighted_mae(edge_pred, batch.edge_attr_orig)
+            loss = node_loss + edge_loss
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * batch.num_graphs
 
+        # avg_wmae
         avg_loss = total_loss / len(dataloader.dataset)
+        history.append(avg_loss)
         
-        # 报告给Optuna(如果使用)
+        # 报告给Optuna
         if trial:
             trial.report(avg_loss, epoch)
             if trial.should_prune():
+                if verbose:
+                    print(f"Epoch {epoch}: Trial pruned")
                 raise optuna.exceptions.TrialPruned()
 
-        # 早停和保存逻辑
-        if avg_loss < best_loss - min_delta:
+        # 早停逻辑
+        improvement = best_loss - avg_loss
+        if improvement > min_delta:
             best_loss = avg_loss
             best_model = model.state_dict()
             no_improve = 0
+            status = "✅ Improved"
         else:
             no_improve += 1
-            if no_improve >= patience:
-                break
+            status = f"🚫 No improve ({no_improve}/{patience})"
 
+        # 打印训练进度
+        if verbose:
+            print(f"{epoch:<8}{avg_loss:<12.4e}{improvement:<12.2e}{status:<10}")
+
+        # 早停检查
+        if no_improve >= patience:
+            if verbose:
+                print(f"Early stopping at epoch {epoch}")
+            break
+
+    # 加载最佳模型权重
     if best_model:
         model.load_state_dict(best_model)
+    
+    # 训练结束总结
+    if verbose:
+        print("-" * len(header))
+        print(f"Best loss: {best_loss:.4e} at epoch {history.index(best_loss)+1}")
+        print("-" * len(header))
     
     return best_loss, model
 
@@ -162,7 +209,7 @@ def optimize_stage1(
         
         # 创建和训练模型
         encoder, model = create_stage1_model(params, device)
-        best_loss, _ = train_stage1_model(
+        best_wmae, _ = train_stage1_model(
             model=model,
             dataloader=nodeedge_loader,
             device=device,
@@ -173,13 +220,13 @@ def optimize_stage1(
         )
         
         # 保存当前trial的最佳encoder
-        if best_loss < float('inf'):
+        if best_wmae < float('inf'):
             torch.save(
                 encoder.state_dict(),
                 os.path.join(tmp_dir, f"encoder_trial{trial.number}.pt")
             )
         
-        return best_loss
+        return best_wmae
     
     # 运行Optuna优化
     study = optuna.create_study(
@@ -307,3 +354,31 @@ def train_final_stage1_model(
     
     print(f"✅ Final model trained with loss {best_loss:.4f}, saved to {output_path}")
     return model
+
+if __name__ == "__main__":
+    # --- 1) 走一遍数据加载 & 划分 ---
+    from data_preparation import get_data_paths, load_and_split_data
+    paths   = get_data_paths()
+    train_df, _, _ = load_and_split_data(paths)
+
+    # --- 2) 拿 node-edge 的 DataLoader ---
+    _, _, nodeedge_loader, device = setup_stage1_data(train_df)
+    batch = next(iter(nodeedge_loader)).to(device)
+
+    # --- 3) 构造一个小模型（随便选个 hidden_dim & layer 数）并注入 sample_batch 推断维度 ---
+    demo_params = {"hidden_dim": 32, "num_edge_layers": 3}
+    encoder, model = create_stage1_model(demo_params, device)
+
+    # --- 4) 前向一次，检查输出 shape ---
+    node_pred, edge_pred = model(
+        batch.x_masked,
+        batch.edge_index,
+        batch.edge_attr_masked,
+        batch.batch
+    )
+    assert node_pred.shape == batch.x_orig.shape, \
+        f"❌ node_pred {tuple(node_pred.shape)} vs x_orig {tuple(batch.x_orig.shape)}"
+    assert edge_pred.shape == batch.edge_attr_orig.shape, \
+        f"❌ edge_pred {tuple(edge_pred.shape)} vs edge_attr_orig {tuple(batch.edge_attr_orig.shape)}"
+
+    print("✅ Stage1 shape check passed!")
