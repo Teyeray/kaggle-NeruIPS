@@ -16,44 +16,6 @@ import torch
 from torch_geometric.data import InMemoryDataset, Data
 
 
-# -----------------------------
-# 环境变量配置
-# -----------------------------
-def get_data_paths():
-    """
-    从环境变量获取数据路径，提供默认值
-    """
-    # 主数据目录
-    BASE_PATH = os.getenv('NEURIPS_DATA_PATH', '/kaggle/input/neurips-open-polymer-prediction-2025')
-    EXTRA_BASE = os.getenv('EXTRA_DATA_BASE', '/kaggle/input/smiles-extra-data')
-    TC_BASE = os.getenv('TC_DATA_BASE', '/kaggle/input/tc-smiles')
-    
-    # 各个数据文件路径
-    paths = {
-        'train_csv': os.getenv('TRAIN_CSV_PATH', os.path.join(BASE_PATH, 'train.csv')),
-        'test_csv': os.getenv('TEST_CSV_PATH', os.path.join(BASE_PATH, 'test.csv')),
-        'sample_submission': os.getenv('SAMPLE_SUBMISSION_PATH', os.path.join(BASE_PATH, 'sample_submission.csv')),
-        
-        # Tc 数据
-        'tc_data': os.getenv('TC_DATA_PATH', os.path.join(TC_BASE, 'Tc_SMILES.csv')),
-        
-        # 外部数据文件
-        'tg_jcim_data': os.getenv('TG_JCIM_PATH', os.path.join(EXTRA_BASE, 'JCIM_sup_bigsmiles.csv')),
-        'tg_excel_data': os.getenv('TG_EXCEL_PATH', os.path.join(EXTRA_BASE, 'data_tg3.xlsx')),
-        'density_data': os.getenv('DENSITY_PATH', os.path.join(EXTRA_BASE, 'data_dnst1.xlsx')),
-        
-        # 补充数据目录
-        'supplement_dir': os.getenv('SUPPLEMENT_DIR', os.path.join(BASE_PATH, 'train_supplement')),
-        'ffv_data': os.getenv('FFV_DATA_PATH', os.path.join(BASE_PATH, 'train_supplement', 'dataset4.csv')),
-        
-        # 其他补充数据
-        'dataset1': os.getenv('DATASET1_PATH', os.path.join(BASE_PATH, 'train_supplement', 'dataset1.csv')),
-        'dataset2': os.getenv('DATASET2_PATH', os.path.join(BASE_PATH, 'train_supplement', 'dataset2.csv')),
-        'dataset3': os.getenv('DATASET3_PATH', os.path.join(BASE_PATH, 'train_supplement', 'dataset3.csv')),
-    }
-    
-    return paths
-
 class NodeEdgeMaskDataset(InMemoryDataset):
     """
     Node/Edge-level SSL 数据集：每个样本随机 mask 2 个节点和 2 条边，
@@ -265,6 +227,46 @@ class PolymerDataset(InMemoryDataset):
     def get(self, idx):
         return self.data_list[idx]
 
+
+# -----------------------------
+# 环境变量配置
+# -----------------------------
+def test1():
+    return 
+def get_data_paths():
+    """
+    从环境变量获取数据路径，提供默认值
+    """
+    # 主数据目录
+    BASE_PATH = os.getenv('NEURIPS_DATA_PATH', '/kaggle/input/neurips-open-polymer-prediction-2025')
+    EXTRA_BASE = os.getenv('EXTRA_DATA_BASE', '/kaggle/input/smiles-extra-data')
+    TC_BASE = os.getenv('TC_DATA_BASE', '/kaggle/input/tc-smiles')
+    
+    # 各个数据文件路径
+    paths = {
+        'train_csv': os.getenv('TRAIN_CSV_PATH', os.path.join(BASE_PATH, 'train.csv')),
+        'test_csv': os.getenv('TEST_CSV_PATH', os.path.join(BASE_PATH, 'test.csv')),
+        'sample_submission': os.getenv('SAMPLE_SUBMISSION_PATH', os.path.join(BASE_PATH, 'sample_submission.csv')),
+        
+        # Tc 数据
+        'tc_data': os.getenv('TC_DATA_PATH', os.path.join(TC_BASE, 'Tc_SMILES.csv')),
+        
+        # 外部数据文件
+        'tg_jcim_data': os.getenv('TG_JCIM_PATH', os.path.join(EXTRA_BASE, 'JCIM_sup_bigsmiles.csv')),
+        'tg_excel_data': os.getenv('TG_EXCEL_PATH', os.path.join(EXTRA_BASE, 'data_tg3.xlsx')),
+        'density_data': os.getenv('DENSITY_PATH', os.path.join(EXTRA_BASE, 'data_dnst1.xlsx')),
+        
+        # 补充数据目录
+        'supplement_dir': os.getenv('SUPPLEMENT_DIR', os.path.join(BASE_PATH, 'train_supplement')),
+        'ffv_data': os.getenv('FFV_DATA_PATH', os.path.join(BASE_PATH, 'train_supplement', 'dataset4.csv')),
+        
+        # 其他补充数据
+        'dataset1': os.getenv('DATASET1_PATH', os.path.join(BASE_PATH, 'train_supplement', 'dataset1.csv')),
+        'dataset2': os.getenv('DATASET2_PATH', os.path.join(BASE_PATH, 'train_supplement', 'dataset2.csv')),
+        'dataset3': os.getenv('DATASET3_PATH', os.path.join(BASE_PATH, 'train_supplement', 'dataset3.csv')),
+    }
+    
+    return paths
 
 # -----------------------------
 # 构造数据集 & DataLoader

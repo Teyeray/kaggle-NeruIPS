@@ -2,7 +2,7 @@ import optuna
 import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
-
+import os
 from model import WDMPNN, NodeEdgeSSLModel
 from data_preparation import load_and_split_data, PolymerDataset, NodeEdgeMaskDataset, get_data_paths
 
@@ -111,18 +111,26 @@ def objective_stage1(
     return best_loss
 
 
+def init_sudy1(
+        storage_uri="sqlite:///stage1_optuna.db",
+        study_name="stage1_nodeedge_ssl"
+):
+    """
+    初始化 Stage1 的 Optuna Study
+    """
+    # 确保输出目录存在
+    os.makedirs("stage1_checkpoints", exist_ok=True)
 
-# 4) 启动 Optuna
-storage_uri = "sqlite:///stage1_optuna.db"
-study1 = optuna.create_study(
-    study_name="stage1_nodeedge_ssl",
-    direction="minimize",
-    pruner=optuna.pruners.MedianPruner(),
-    storage=storage_uri,
-    load_if_exists=True,
-)
+    # 创建或加载 Study
+    study = optuna.create_study(
+        study_name= study_name,
+        direction="minimize",
+        pruner=optuna.pruners.MedianPruner(),
+        storage=storage_uri,
+        load_if_exists=True,
+    )
+    return study
 #study1.optimize(objective_stage1, show_progress_bar=True, n_trials=20)
-
 print("Stage1 best params:", study1.best_trial.params)
 best_trial = study1.best_trial
 best_params = best_trial.params
