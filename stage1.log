@@ -1,58 +1,0 @@
-nohup: ignoring input
-[15:25:01] SMILES Parse Error: syntax error while parsing: *O[Si](*)([R])[R]
-[15:25:01] SMILES Parse Error: Failed parsing SMILES '*O[Si](*)([R])[R]' for input: '*O[Si](*)([R])[R]'
-[15:25:01] SMILES Parse Error: syntax error while parsing: *NC(=O)c4ccc3c(=O)n(c2ccc([R]c1ccc(*)cc1)cc2)c(=O)c3c4
-[15:25:01] SMILES Parse Error: Failed parsing SMILES '*NC(=O)c4ccc3c(=O)n(c2ccc([R]c1ccc(*)cc1)cc2)c(=O)c3c4' for input: '*NC(=O)c4ccc3c(=O)n(c2ccc([R]c1ccc(*)cc1)cc2)c(=O)c3c4'
-[15:25:01] SMILES Parse Error: syntax error while parsing: O=C=N[R1]N=C=O.O[R2]O.O[R3]O
-[15:25:01] SMILES Parse Error: Failed parsing SMILES 'O=C=N[R1]N=C=O.O[R2]O.O[R3]O' for input: 'O=C=N[R1]N=C=O.O[R2]O.O[R3]O'
-[15:25:01] SMILES Parse Error: syntax error while parsing: *CN([R'])Cc2cc([R]c1cc(*)c(O)c(CN([R'])C*)c1)cc(*)c2O
-[15:25:01] SMILES Parse Error: Failed parsing SMILES '*CN([R'])Cc2cc([R]c1cc(*)c(O)c(CN([R'])C*)c1)cc(*)c2O' for input: '*CN([R'])Cc2cc([R]c1cc(*)c(O)c(CN([R'])C*)c1)cc(*)c2O'
-[15:25:01] SMILES Parse Error: syntax error while parsing: *C(F)(F)CC(F)([R])C(*)(F)F
-[15:25:01] SMILES Parse Error: Failed parsing SMILES '*C(F)(F)CC(F)([R])C(*)(F)F' for input: '*C(F)(F)CC(F)([R])C(*)(F)F'
-[15:25:01] SMILES Parse Error: syntax error while parsing: *OC2OC(CO[R])C(OC1OC(CO[R])C(*)C(O[R])C1O[R])C(O[R])C2O[R]
-[15:25:01] SMILES Parse Error: Failed parsing SMILES '*OC2OC(CO[R])C(OC1OC(CO[R])C(*)C(O[R])C1O[R])C(O[R])C2O[R]' for input: '*OC2OC(CO[R])C(OC1OC(CO[R])C(*)C(O[R])C1O[R])C(O[R])C2O[R]'
-[I 2025-07-31 15:25:06,825] Using an existing study with name 'stage1_nodeedge_ssl' instead of creating a new one.
-👉 加载主训练数据
-  原始训练样本数: 7973
-  → 正在增强 Tc 数据，共 874 条
-cross_smiles: 737
-    填充已有样本 0 条，新增样本 129 条
-  → 正在增强 Tg 数据，共 662 条
-cross_smiles: 526
-    填充已有样本 15 条，新增样本 136 条
-  → 正在增强 Tg 数据，共 501 条
-cross_smiles: 0
-    填充已有样本 0 条，新增样本 499 条
-  → 正在增强 Density 数据，共 787 条
-cross_smiles: 254
-    填充已有样本 110 条，新增样本 525 条
-  → 正在增强 FFV 数据，共 862 条
-cross_smiles: 43
-    填充已有样本 43 条，新增样本 819 条
-add dataset4: 10081
-👉 划分 train / validation / test
-  划分结果: train=8064, val=1008, test=1009
-📦 构建 PolymerDataset，样本数=8064
-   成功转换为图数据: 8064 条
-  0%|          | 0/20 [00:00<?, ?it/s]                                        0%|          | 0/20 [00:16<?, ?it/s]Best trial: 7. Best value: 0.200852:   0%|          | 0/20 [00:16<?, ?it/s]Best trial: 7. Best value: 0.200852:   5%|▌         | 1/20 [00:16<05:10, 16.33s/it]                                                                                   Best trial: 7. Best value: 0.200852:   5%|▌         | 1/20 [00:46<05:10, 16.33s/it]Best trial: 7. Best value: 0.200852:   5%|▌         | 1/20 [00:46<05:10, 16.33s/it]Best trial: 7. Best value: 0.200852:  10%|█         | 2/20 [00:46<07:17, 24.31s/it]                                                                                   Best trial: 7. Best value: 0.200852:  10%|█         | 2/20 [01:23<07:17, 24.31s/it]Best trial: 7. Best value: 0.200852:  10%|█         | 2/20 [01:23<07:17, 24.31s/it]Best trial: 7. Best value: 0.200852:  15%|█▌        | 3/20 [01:23<08:32, 30.15s/it]                                                                                   Best trial: 7. Best value: 0.200852:  15%|█▌        | 3/20 [01:33<08:32, 30.15s/it]Best trial: 7. Best value: 0.200852:  15%|█▌        | 3/20 [01:33<08:32, 30.15s/it]Best trial: 7. Best value: 0.200852:  20%|██        | 4/20 [01:33<05:54, 22.19s/it]                                                                                   Best trial: 7. Best value: 0.200852:  20%|██        | 4/20 [01:42<05:54, 22.19s/it]Best trial: 7. Best value: 0.200852:  20%|██        | 4/20 [01:42<05:54, 22.19s/it]Best trial: 7. Best value: 0.200852:  25%|██▌       | 5/20 [01:42<04:19, 17.33s/it]                                                                                   Best trial: 7. Best value: 0.200852:  25%|██▌       | 5/20 [14:16<04:19, 17.33s/it]Best trial: 7. Best value: 0.200852:  25%|██▌       | 5/20 [14:16<04:19, 17.33s/it]Best trial: 7. Best value: 0.200852:  30%|███       | 6/20 [14:16<1:02:31, 267.97s/it]                                                                                      Best trial: 7. Best value: 0.200852:  30%|███       | 6/20 [14:35<1:02:31, 267.97s/it]Best trial: 7. Best value: 0.200852:  30%|███       | 6/20 [14:35<1:02:31, 267.97s/it]Best trial: 7. Best value: 0.200852:  35%|███▌      | 7/20 [14:35<40:26, 186.64s/it]                                                                                      Best trial: 7. Best value: 0.200852:  35%|███▌      | 7/20 [24:12<40:26, 186.64s/it]Best trial: 7. Best value: 0.200852:  35%|███▌      | 7/20 [24:12<40:26, 186.64s/it]Best trial: 7. Best value: 0.200852:  40%|████      | 8/20 [24:12<1:02:10, 310.88s/it]                                                                                      Best trial: 7. Best value: 0.200852:  40%|████      | 8/20 [24:27<1:02:10, 310.88s/it]Best trial: 7. Best value: 0.200852:  40%|████      | 8/20 [24:27<1:02:10, 310.88s/it]Best trial: 7. Best value: 0.200852:  45%|████▌     | 9/20 [24:27<40:02, 218.44s/it]                                                                                      Best trial: 7. Best value: 0.200852:  45%|████▌     | 9/20 [24:46<40:02, 218.44s/it]Best trial: 7. Best value: 0.200852:  45%|████▌     | 9/20 [24:46<40:02, 218.44s/it]Best trial: 7. Best value: 0.200852:  50%|█████     | 10/20 [24:46<26:09, 156.90s/it]                                                                                     Best trial: 7. Best value: 0.200852:  50%|█████     | 10/20 [25:04<26:09, 156.90s/it]Best trial: 7. Best value: 0.200852:  50%|█████     | 10/20 [25:04<26:09, 156.90s/it]Best trial: 7. Best value: 0.200852:  55%|█████▌    | 11/20 [25:04<17:07, 114.15s/it]                                                                                     Best trial: 7. Best value: 0.200852:  55%|█████▌    | 11/20 [25:22<17:07, 114.15s/it]Best trial: 7. Best value: 0.200852:  55%|█████▌    | 11/20 [25:22<17:07, 114.15s/it]Best trial: 7. Best value: 0.200852:  60%|██████    | 12/20 [25:22<11:20, 85.08s/it]                                                                                     Best trial: 7. Best value: 0.200852:  60%|██████    | 12/20 [25:42<11:20, 85.08s/it]Best trial: 7. Best value: 0.200852:  60%|██████    | 12/20 [25:42<11:20, 85.08s/it]Best trial: 7. Best value: 0.200852:  65%|██████▌   | 13/20 [25:42<07:37, 65.39s/it]                                                                                    Best trial: 7. Best value: 0.200852:  65%|██████▌   | 13/20 [26:00<07:37, 65.39s/it]Best trial: 7. Best value: 0.200852:  65%|██████▌   | 13/20 [26:00<07:37, 65.39s/it]Best trial: 7. Best value: 0.200852:  70%|███████   | 14/20 [26:00<05:05, 50.96s/it]                                                                                    Best trial: 7. Best value: 0.200852:  70%|███████   | 14/20 [34:53<05:05, 50.96s/it]Best trial: 7. Best value: 0.200852:  70%|███████   | 14/20 [34:53<05:05, 50.96s/it]Best trial: 7. Best value: 0.200852:  75%|███████▌  | 15/20 [34:53<16:21, 196.35s/it]                                                                                     Best trial: 7. Best value: 0.200852:  75%|███████▌  | 15/20 [39:33<16:21, 196.35s/it]Best trial: 7. Best value: 0.200852:  75%|███████▌  | 15/20 [39:33<16:21, 196.35s/it]Best trial: 7. Best value: 0.200852:  80%|████████  | 16/20 [39:33<14:45, 221.32s/it]                                                                                     Best trial: 7. Best value: 0.200852:  80%|████████  | 16/20 [39:53<14:45, 221.32s/it]Best trial: 7. Best value: 0.200852:  80%|████████  | 16/20 [39:53<14:45, 221.32s/it]Best trial: 7. Best value: 0.200852:  85%|████████▌ | 17/20 [39:53<08:02, 160.81s/it]                                                                                     Best trial: 7. Best value: 0.200852:  85%|████████▌ | 17/20 [52:32<08:02, 160.81s/it]Best trial: 7. Best value: 0.200852:  85%|████████▌ | 17/20 [52:32<08:02, 160.81s/it]Best trial: 7. Best value: 0.200852:  90%|█████████ | 18/20 [52:32<11:21, 340.80s/it]                                                                                     Best trial: 7. Best value: 0.200852:  90%|█████████ | 18/20 [1:04:53<11:21, 340.80s/it]Best trial: 31. Best value: 0.197798:  90%|█████████ | 18/20 [1:04:53<11:21, 340.80s/it]Best trial: 31. Best value: 0.197798:  95%|█████████▌| 19/20 [1:04:53<07:40, 460.86s/it]                                                                                        Best trial: 31. Best value: 0.197798:  95%|█████████▌| 19/20 [1:05:04<07:40, 460.86s/it]Best trial: 31. Best value: 0.197798:  95%|█████████▌| 19/20 [1:05:04<07:40, 460.86s/it]Best trial: 31. Best value: 0.197798: 100%|██████████| 20/20 [1:05:04<00:00, 325.81s/it]Best trial: 31. Best value: 0.197798: 100%|██████████| 20/20 [1:05:04<00:00, 195.23s/it]
-[I 2025-07-31 15:25:23,152] Trial 13 pruned. 
-[I 2025-07-31 15:25:53,051] Trial 14 pruned. 
-[I 2025-07-31 15:26:30,142] Trial 15 pruned. 
-[I 2025-07-31 15:26:40,124] Trial 16 pruned. 
-[I 2025-07-31 15:26:48,848] Trial 17 pruned. 
-[I 2025-07-31 15:39:23,353] Trial 18 pruned. 
-[I 2025-07-31 15:39:42,551] Trial 19 pruned. 
-[I 2025-07-31 15:49:19,456] Trial 20 finished with value: 0.22658848026323886 and parameters: {'lr': 0.009969908848477989, 'hidden_dim': 64, 'num_edge_layers': 3}. Best is trial 7 with value: 0.2008519253087422.
-[I 2025-07-31 15:49:34,643] Trial 21 pruned. 
-[I 2025-07-31 15:49:53,741] Trial 22 pruned. 
-[I 2025-07-31 15:50:10,947] Trial 23 pruned. 
-[I 2025-07-31 15:50:29,547] Trial 24 pruned. 
-[I 2025-07-31 15:50:49,641] Trial 25 pruned. 
-[I 2025-07-31 15:51:07,239] Trial 26 pruned. 
-[I 2025-07-31 16:00:00,555] Trial 27 finished with value: 0.2184660184596266 and parameters: {'lr': 0.004271831644470122, 'hidden_dim': 64, 'num_edge_layers': 2}. Best is trial 7 with value: 0.2008519253087422.
-[I 2025-07-31 16:04:39,848] Trial 28 pruned. 
-[I 2025-07-31 16:04:59,941] Trial 29 pruned. 
-[I 2025-07-31 16:17:39,725] Trial 30 finished with value: 0.2022316021223863 and parameters: {'lr': 0.00543010628137958, 'hidden_dim': 64, 'num_edge_layers': 2}. Best is trial 7 with value: 0.2008519253087422.
-[I 2025-07-31 16:30:00,264] Trial 31 finished with value: 0.19779781559630047 and parameters: {'lr': 0.005516672438953795, 'hidden_dim': 64, 'num_edge_layers': 3}. Best is trial 31 with value: 0.19779781559630047.
-[I 2025-07-31 16:30:11,335] Trial 32 pruned. 
-Stage1 best params: {'lr': 0.005516672438953795, 'hidden_dim': 64, 'num_edge_layers': 3}
