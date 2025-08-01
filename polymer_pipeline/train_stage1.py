@@ -38,35 +38,36 @@ base_graph_ds = PolymerDataset(train_df, y_cols=[])
 dataset_nodeedge = NodeEdgeMaskDataset(base_graph_ds, device=device)
 nodeedge_loader = DataLoader(dataset_nodeedge, batch_size=64, shuffle=True)
 
-
-def objective_stage1(trial):
+def objective_stage1(
+    trial,
+    nodeedge_loader,
+    device,
+    out_dir: str = "stage1_checkpoints",
+    prefix: str = "encoder"
+):
     # 超参空间
     lr         = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
     hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256])
     n_layers   = trial.suggest_int("num_edge_layers", 2, 4)
 
     # 早停参数
-    patience = 15  # 允许连续 15 轮验证损失不下降
-    min_delta = 1e-3  # 变化阈值
+    patience = 15
+    min_delta = 1e-3
     best_loss = float('inf')
     no_improve = 0
-    
-    # 模型 & SSL head
-    encoder = WDMPNN(
-        node_feat_dim=2,        # 与 create_graph_from_smiles 中的 node_feat_dim 对应
-        edge_feat_dim=1,        # 与 edge_feat_dim 对应
-        hidden_dim=hidden_dim,
-        num_edge_layers=n_layers
-    ).to(device)
-    model = NodeEdgeSSLModel(encoder, node_feat_dim=2, edge_feat_dim=1).to(device)
 
+    # 确保输出目录存在
+    os.makedirs(out_dir, exist_ok=True)
+
+    # 模型 & SSL head
+    encoder = WDMPNN(2, 1, hidden_dim, n_layers).to(device)
+    model   = NodeEdgeSSLModel(encoder, node_feat_dim=2, edge_feat_dim=1).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    # 训练若干 epoch
     epoch = 0
     while True:
         epoch += 1
-        total_loss = 0
+        total_loss = 0.0
         for batch in nodeedge_loader:
             batch = batch.to(device)
             node_pred, edge_pred = model(
@@ -87,22 +88,26 @@ def objective_stage1(trial):
         avg_loss = total_loss / len(nodeedge_loader.dataset)
         trial.report(avg_loss, epoch)
 
-        # 早停判断
+        # 如果性能提升，保存 checkpoint
         if avg_loss < best_loss - min_delta:
             best_loss = avg_loss
             no_improve = 0
-            # 保存最佳模型
-            torch.save(encoder.state_dict(), f"stage1_encoder_trial{trial.number}.pt")
+            ckpt_path = os.path.join(
+                out_dir,
+                f"{prefix}_trial{trial.number}_epoch{epoch}.pt"
+            )
+            torch.save(encoder.state_dict(), ckpt_path)
         else:
             no_improve += 1
             if no_improve >= patience:
-                break  # 早停
+                break
 
         if trial.should_prune():
             raise optuna.exceptions.TrialPruned()
 
-    # 保存最优 encoder 权重
-    torch.save(encoder.state_dict(), f"stage1_encoder_trial{trial.number}.pt")
+    # 最后再保存一次最优权重（以 trial 号为标识）
+    final_ckpt = os.path.join(out_dir, f"{prefix}_best_trial{trial.number}.pt")
+    torch.save(encoder.state_dict(), final_ckpt)
     return best_loss
 
 

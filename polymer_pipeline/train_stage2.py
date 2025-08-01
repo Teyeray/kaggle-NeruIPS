@@ -26,30 +26,53 @@ def add_pseudo_label(dataset):
             mol_weight = Descriptors.MolWt(mol) if mol is not None else data.x[:, 0].sum().item()
         data.pseudo = torch.tensor([mol_weight], dtype=torch.float)
 
-def load_stage1_models(device=None):
+def load_stage1_models(
+    best_params_path: str = "stage1_best_params.pt",
+    encoder_weights_path: str = None,
+    device: torch.device = None
+):
     """
-    加载Stage1训练好的模型和参数
-    
+    加载 Stage1 训练好的模型和超参。
+
     Args:
-        device: 计算设备
-    
+        best_params_path: 包含 best 参数的 .pt 文件路径。
+        encoder_weights_path: encoder 权重文件路径，若为 None，则从 best_params 中拼接。
+        device: 计算设备，默认自动选择 cuda/CPU。
+
     Returns:
-        tuple: (encoder, best_params)
+        encoder: 加载好的 WDMPNN 模型（eval 模式）。
+        best_params: 从 best_params_path 读取的超参 dict。
     """
+    # 设备
     if device is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # 从 Stage1 读取最佳超参 & encoder 权重
-    best = torch.load("stage1_best_params.pt")  # 存好的 dict
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 读取超参
+    best_params = torch.load(best_params_path, map_location=device)
+
+    # 如果没有单独提供 encoder 权重路径，就拼一个默认名字
+    if encoder_weights_path is None:
+        trial = best_params.get("trial_number")
+        if trial is not None:
+            encoder_weights_path = f"stage1_encoder_trial{trial}.pt"
+        else:
+            encoder_weights_path = "stage1_encoder_best.pt"
+
+    # 检查文件存在
+    if not os.path.exists(encoder_weights_path):
+        raise FileNotFoundError(f"Encoder weights not found: {encoder_weights_path}")
+
+    # 构建模型并加载
     encoder = WDMPNN(
         node_feat_dim=2,
         edge_feat_dim=1,
-        hidden_dim=best["hidden_dim"],
-        num_edge_layers=best["num_edge_layers"]
+        hidden_dim=best_params["hidden_dim"],
+        num_edge_layers=best_params["num_edge_layers"]
     ).to(device)
-    encoder.load_state_dict(torch.load("stage1_encoder_best.pt"))
-    
-    return encoder, best
+    encoder.load_state_dict(torch.load(encoder_weights_path, map_location=device))
+    encoder.eval()
+
+    return encoder, best_params
 
 def prepare_stage2_data(paths=None, batch_size=64):
     """
@@ -79,7 +102,7 @@ def prepare_stage2_data(paths=None, batch_size=64):
 def create_stage2_model(encoder, best_params, device=None):
     """
     创建Stage2模型
-    
+
     Args:
         encoder: Stage1训练好的encoder
         best_params: Stage1最佳参数
