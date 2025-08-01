@@ -220,7 +220,7 @@ def create_graph_from_smiles(smiles):
             int(atom.IsInRing()),
             atom.GetMass(),
             int(atom.GetChiralTag()!=Chem.CHI_UNSPECIFIED),
-            float(atom.GetProp('_GasteigerCharge')) if atom.HasProp('_GasteigerCharge') else 0.0
+            #float(atom.GetProp('_GasteigerCharge')) if atom.HasProp('_GasteigerCharge') else 0.0
         ])
     x = torch.tensor(x_feats, dtype=torch.float)
 
@@ -287,7 +287,7 @@ class PolymerDataset(InMemoryDataset):
                 print(f"[Validation FAILED] {smi} → {e}")
                 continue        # 跳过这条
             y = torch.tensor([row[c] for c in y_cols], dtype=torch.float)
-            data = Data(x=x, edge_index=ei, edge_attr=ea, y=y)
+            data = Data(x=x, edge_index=ei, edge_attr=ea, y=y, smiles=smi)
             self.data_list.append(data)
         print(f"   成功转换为图数据: {len(self.data_list)} 条")
     def len(self): return len(self.data_list)

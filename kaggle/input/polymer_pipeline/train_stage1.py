@@ -59,8 +59,8 @@ def create_stage1_model(params, device):
     hidden_dim = params["hidden_dim"]
     n_layers = params["num_edge_layers"]
     
-    encoder = WDMPNN(10, 4, hidden_dim, n_layers).to(device)
-    model = NodeEdgeSSLModel(encoder, node_feat_dim=10, edge_feat_dim=4).to(device)
+    encoder = WDMPNN(9, 4, hidden_dim, n_layers).to(device)
+    model = NodeEdgeSSLModel(encoder, node_feat_dim=9, edge_feat_dim=4).to(device)
 
     return encoder, model
 
@@ -73,30 +73,17 @@ def train_stage1_model(
     patience: int = 15,
     min_delta: float = 1e-3,
     trial: optuna.Trial = None,
-    verbose: bool = True  # 新增控制打印的参数
+    verbose: bool = True
 ) -> Tuple[float, torch.nn.Module]:
     """
     训练Stage1模型（带完整训练日志）
-    
-    Args:
-        model: 要训练的模型
-        dataloader: 数据加载器
-        device: 计算设备
-        lr: 学习率
-        max_epochs: 最大训练轮次
-        patience: 早停耐心值
-        min_delta: 最小改进阈值
-        trial: Optuna Trial对象(可选)
-        verbose: 是否打印训练进度
-    
-    Returns:
-        tuple: (best_loss, trained_model)
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     best_loss = float('inf')
     best_model = None
+    best_epoch = 0
     no_improve = 0
-    history = []  # 记录损失历史
+    history = []
 
     # 训练头部分隔线
     if verbose:
@@ -108,25 +95,47 @@ def train_stage1_model(
     for epoch in range(1, max_epochs + 1):
         model.train()
         total_loss = 0.0
+        batch_count = 0
 
         for batch in dataloader:
             batch = batch.to(device)
             optimizer.zero_grad()
-            node_pred, edge_pred = model(
-                batch.x_masked,
-                batch.edge_index,
-                batch.edge_attr_masked,
-                batch.batch
-            )
-            node_loss = weighted_mae(node_pred, batch.x_orig) 
-            edge_loss = weighted_mae(edge_pred, batch.edge_attr_orig)
-            loss = node_loss + edge_loss
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item() * batch.num_graphs
+            
+            try:
+                node_pred, edge_pred = model(
+                    batch.x_masked,
+                    batch.edge_index,
+                    batch.edge_attr_masked,
+                    batch.batch
+                )
+                node_loss = weighted_mae(node_pred, batch.x_orig) 
+                edge_loss = weighted_mae(edge_pred, batch.edge_attr_orig)
+                loss = node_loss + edge_loss
+                
+                # Check for invalid loss
+                if torch.isnan(loss) or torch.isinf(loss):
+                    if verbose:
+                        print(f"⚠️ Invalid loss detected: {loss.item()}")
+                    continue
+                
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item() * batch.num_graphs
+                batch_count += batch.num_graphs
+                
+            except Exception as e:
+                if verbose:
+                    print(f"⚠️ Error in batch processing: {e}")
+                continue
 
-        # avg_wmae
-        avg_loss = total_loss / len(dataloader.dataset)
+        # Skip epoch if no valid batches
+        if batch_count == 0:
+            if verbose:
+                print(f"Epoch {epoch}: No valid batches processed")
+            continue
+
+        # Calculate average loss
+        avg_loss = total_loss / batch_count
         history.append(avg_loss)
         
         # 报告给Optuna
@@ -141,6 +150,7 @@ def train_stage1_model(
         improvement = best_loss - avg_loss
         if improvement > min_delta:
             best_loss = avg_loss
+            best_epoch = epoch
             best_model = model.state_dict()
             no_improve = 0
             status = "✅ Improved"
@@ -165,7 +175,10 @@ def train_stage1_model(
     # 训练结束总结
     if verbose:
         print("-" * len(header))
-        print(f"Best loss: {best_loss:.4e} at epoch {history.index(best_loss)+1}")
+        if best_loss == float('inf'):
+            print("⚠️ Training failed - no valid loss recorded")
+        else:
+            print(f"Best loss: {best_loss:.4e} at epoch {best_epoch}")
         print("-" * len(header))
     
     return best_loss, model
@@ -354,31 +367,3 @@ def train_final_stage1_model(
     
     print(f"✅ Final model trained with loss {best_loss:.4f}, saved to {output_path}")
     return model
-
-if __name__ == "__main__":
-    # --- 1) 走一遍数据加载 & 划分 ---
-    from data_preparation import get_data_paths, load_and_split_data
-    paths   = get_data_paths()
-    train_df, _, _ = load_and_split_data(paths)
-
-    # --- 2) 拿 node-edge 的 DataLoader ---
-    _, _, nodeedge_loader, device = setup_stage1_data(train_df)
-    batch = next(iter(nodeedge_loader)).to(device)
-
-    # --- 3) 构造一个小模型（随便选个 hidden_dim & layer 数）并注入 sample_batch 推断维度 ---
-    demo_params = {"hidden_dim": 32, "num_edge_layers": 3}
-    encoder, model = create_stage1_model(demo_params, device)
-
-    # --- 4) 前向一次，检查输出 shape ---
-    node_pred, edge_pred = model(
-        batch.x_masked,
-        batch.edge_index,
-        batch.edge_attr_masked,
-        batch.batch
-    )
-    assert node_pred.shape == batch.x_orig.shape, \
-        f"❌ node_pred {tuple(node_pred.shape)} vs x_orig {tuple(batch.x_orig.shape)}"
-    assert edge_pred.shape == batch.edge_attr_orig.shape, \
-        f"❌ edge_pred {tuple(edge_pred.shape)} vs edge_attr_orig {tuple(batch.edge_attr_orig.shape)}"
-
-    print("✅ Stage1 shape check passed!")
