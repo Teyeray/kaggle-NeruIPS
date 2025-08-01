@@ -2,6 +2,7 @@ import optuna
 import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
+import os
 
 from model import WDMPNN, NodeEdgeSSLModel
 from data_preparation import load_and_split_data, PolymerDataset, NodeEdgeMaskDataset, get_data_paths
@@ -44,6 +45,7 @@ def objective_stage1(
     device,
     out_dir: str = "stage1_checkpoints",
     prefix: str = "encoder"
+    patience: int = 15
 ):
     # 超参空间
     lr         = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
@@ -51,7 +53,6 @@ def objective_stage1(
     n_layers   = trial.suggest_int("num_edge_layers", 2, 4)
 
     # 早停参数
-    patience = 15
     min_delta = 1e-3
     best_loss = float('inf')
     no_improve = 0
@@ -111,30 +112,59 @@ def objective_stage1(
     return best_loss
 
 
+def init_study(study_name: str = "stage1_nodeedge_ssl",
+               storage_uri: str = "sqlite:///stage1_optuna.db"):
+    """
+    初始化 Optuna Study
+    
+    Args:
+        study_name: Study 名称
+        storage_uri: 存储 URI
+    
+    Returns:
+        optuna.Study: 初始化的 Study 对象
+    """
+    return optuna.create_study(
+        study_name=study_name,
+        direction="minimize",
+        pruner=optuna.pruners.MedianPruner(),
+        storage=storage_uri,
+        load_if_exists=True
+    )
 
-# 4) 启动 Optuna
-storage_uri = "sqlite:///stage1_optuna.db"
-study1 = optuna.create_study(
-    study_name="stage1_nodeedge_ssl",
-    direction="minimize",
-    pruner=optuna.pruners.MedianPruner(),
-    storage=storage_uri,
-    load_if_exists=True,
-)
 #study1.optimize(objective_stage1, show_progress_bar=True, n_trials=20)
 
-print("Stage1 best params:", study1.best_trial.params)
-best_trial = study1.best_trial
-best_params = best_trial.params
-best_params["trial_number"] = best_trial.number
 
-# 保存权重为统一名称（而不是 trial 编号）
-torch.save(
-    torch.load(f"stage1_encoder_trial{best_trial.number}.pt"),
-    "stage1_encoder_best.pt"
-)
+def save_stage1_artifacts(
+    study,
+    best_params_src: str,    # e.g. "stage1_best_params.pt"
+    best_encoder_src: str,   # e.g. "stage1_encoder_best.pt"
+    output_dir: str = "stage1_artifacts"
+):
+    """
+    将 Stage1 最佳超参和 encoder 权重拷贝到 output_dir，
+    并在文件名里添加 trial_number 后缀以防覆盖。
 
-# 保存超参数 dict，包括 trial_number
-torch.save(best_params, "stage1_best_params.pt")
-print("✅ 已保存最佳 encoder 权重 → stage1_encoder_best.pt")
-print("✅ 已保存最佳参数字典    → stage1_best_params.pt")
+    Args:
+        study: 已完成 optimize() 的 optuna.Study 对象
+        best_params_src: 源参数文件路径
+        best_encoder_src: 源 encoder 权重文件路径
+        output_dir: artifacts 要保存的目录
+    """
+    # 准备目录
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 拿到最佳 trial 编号
+    n = study.best_trial.number
+
+    # 1) 参数字典
+    params_dst = os.path.join(output_dir, f"stage1_best_params_trial{n}.pt")
+    # 直接拷贝已有的参数文件
+    shutil.copy(best_params_src, params_dst)
+
+    # 2) Encoder 权重
+    encoder_dst = os.path.join(output_dir, f"stage1_encoder_best_trial{n}.pt")
+    shutil.copy(best_encoder_src, encoder_dst)
+
+    print(f"✅ saved params → {params_dst}")
+    print(f"✅ saved encoder → {encoder_dst}")
