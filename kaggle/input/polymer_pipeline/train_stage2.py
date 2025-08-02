@@ -65,7 +65,7 @@ def create_stage2_model_from_stage1(
     stage1_params = checkpoint["params"]
 
     encoder = WDMPNN(
-        node_feat_dim=10,
+        node_feat_dim=9,
         edge_feat_dim=4,
         hidden_dim=stage1_params["hidden_dim"],
         num_edge_layers=stage1_params["num_edge_layers"]
@@ -174,8 +174,8 @@ def optimize_stage2(
 
     def objective(trial):
         predictor_params = {
-            "predictor_hidden_dim": trial.suggest_categorical("predictor_hidden_dim", [64, 128, 256]),
-            "predictor_num_layers": trial.suggest_int("predictor_num_layers", 1, 3)
+            "predictor_hidden_dim": trial.suggest_categorical("predictor_hidden_dim", [64, 128, 256, 512, 1024]),
+            "predictor_num_layers": trial.suggest_int("predictor_num_layers", 1, 16)
         }
 
         model, stage1_params = create_stage2_model_from_stage1(
@@ -195,7 +195,7 @@ def optimize_stage2(
 
         best_loss, _ = train_stage2_model(
             model, optimizer, loader, device,
-            trial=trial, max_epochs=100, patience=10
+            trial=trial, max_epochs=200, patience=15
         )
 
         torch.save(model.encoder.state_dict(), os.path.join(tmp_dir, f"encoder_trial{trial.number}.pt"))
