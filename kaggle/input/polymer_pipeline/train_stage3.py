@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
-
+from typing import Optional
 from model import WDMPNN, GraphPredictor
 from data_preparation import PolymerDataset
 
@@ -40,14 +40,27 @@ def finetune_property(
     train_df,
     val_df,
     property_name: str,
-    stage1_model_path: str = "final_stage1_model.pth",
-    stage2_model_path: str = "stage2_artifacts/stage2_full_model.pth",
+    best_params_path: str,
+    stage2_encoder_path: str,
+    stage2_predictor_path: str,
     output_dir: str = "stage3_heads",
     device: torch.device = None,
     num_epochs: int = 50,
     batch_size: int = 64,
     patience: int = 10
 ):
+    def weighted_mae(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weight: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        计算加权 MAE：mean(abs(pred - target)) 或者 sum(weight * abs(pred-target)) / sum(weight)
+        """
+        diff = torch.abs(pred - target)
+        if weight is None:
+            return diff.mean()
+        return (weight * diff).sum() / weight.sum()
     # 设备选择
     device = device or (torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
 
@@ -57,22 +70,26 @@ def finetune_property(
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
 
-    # 加载 stage1 超参 & stage2 模型
+    # 加载最佳超参 + Stage2 encoder/predictor
     best = torch.load(best_params_path)
-    encoder = WDMPNN(2, 1, best["hidden_dim"], best["num_edge_layers"]).to(device)
-    encoder.load_state_dict(torch.load(stage2_encoder_path))
-    predictor = GraphPredictor(encoder.hidden_dim, best["hidden_dim"]//2, 1).to(device)
-    predictor.load_state_dict(torch.load(stage2_predictor_path))
+    encoder = WDMPNN(9, 4, best["hidden_dim"], best["num_edge_layers"]).to(device)
+    encoder.load_state_dict(torch.load(stage2_encoder_path, map_location=device))
+    predictor = GraphPredictor(best["hidden_dim"], [best["hidden_dim"] // 2], 1).to(device)
+    predictor.load_state_dict(torch.load(stage2_predictor_path, map_location=device))
 
-    # 下游 head
-    downstream = nn.Sequential(nn.Linear(1,32), nn.ReLU(), nn.Linear(32,1)).to(device)
+    # 下游 head（图级回归）
+    downstream = nn.Sequential(
+        nn.Linear(1, 32),
+        nn.ReLU(),
+        nn.Linear(32, 1)
+    ).to(device)
 
-    # 全量微调
+    # 设置优化器
     optim = torch.optim.Adam(
-        list(encoder.parameters())+
-        list(predictor.parameters())+
+        list(encoder.parameters()) +
+        list(predictor.parameters()) +
         list(downstream.parameters()),
-        lr=best.get("lr",1e-3)
+        lr=best.get("lr", 1e-3)
     )
 
     best_val_mae = float('inf')
@@ -82,8 +99,8 @@ def finetune_property(
         # —— 训练一步 —— 
         encoder.train(); predictor.train(); downstream.train()
 
-        total_abs_error = 0.0
-        total_mse_loss = 0.0
+        total_mae = 0.0
+        total_mse = 0.0
         for data in train_loader:
             data = data.to(device)
             h = encoder(data.x, data.edge_index, data.edge_attr,
@@ -92,17 +109,24 @@ def finetune_property(
             h = predictor(h).view(-1,1)
             out = downstream(h)
             y = data.y.view(-1,1)
-            loss = F.mse_loss(out, y)
-            optim.zero_grad(); loss.backward(); optim.step()
-            total_mse_loss   += loss.item() * data.num_graphs
-            total_abs_error  += torch.abs(out - y).sum().item()
-        train_mse = total_mse_loss / len(train_loader.dataset)
-        train_mae = total_abs_error  / len(train_loader.dataset)
+
+            mae_loss = weighted_mae(out, y)
+            mse_loss = F.mse_loss(out, y)
+
+            optim.zero_grad()
+            mae_loss.backward()
+            optim.step()
+
+            total_mae += mae_loss.item() * data.num_graphs
+            total_mse += mse_loss.item() * data.num_graphs
+
+        train_mae = total_mae / len(train_loader.dataset)
+        train_mse = total_mse / len(train_loader.dataset)
 
         # —— 验证集评估 —— 
         encoder.eval(); predictor.eval(); downstream.eval()
-        val_mse_loss = 0.0
-        val_abs_error = 0.0
+        val_total_mae = 0.0
+        val_total_mse = 0.0
         with torch.no_grad():
             for data in val_loader:
                 data = data.to(device)
@@ -111,11 +135,15 @@ def finetune_property(
                                       data.batch)).view(-1,1)
                 out = downstream(h)
                 y = data.y.view(-1,1)
-                val_mse_loss  += F.mse_loss(out, y, reduction='sum').item()
-                val_abs_error += torch.abs(out - y).sum().item()
 
-        val_mse = val_mse_loss / len(val_loader.dataset)
-        val_mae = val_abs_error / len(val_loader.dataset)
+                mae_loss = weighted_mae(out, y)
+                mse_loss = F.mse_loss(out, y)
+
+                val_total_mae += mae_loss.item() * data.num_graphs
+                val_total_mse += mse_loss.item() * data.num_graphs
+
+        val_mae = val_total_mae / len(val_loader.dataset)
+        val_mse = val_total_mse / len(val_loader.dataset)
 
         print(f"[{property_name}] Epoch {epoch:03d} Train MSE={train_mse:.4f}, MAE={train_mae:.4f}, Val   MSE={val_mse:.4f}, MAE={val_mae:.4f}")
 
@@ -131,22 +159,12 @@ def finetune_property(
                 print(f"Early stopping at epoch {epoch} (no val improvement in {patience} epochs)")
                 break
 
-    # 保存在验证集上最优的 downstream head
+    # 保存模型
     os.makedirs(output_dir, exist_ok=True)
-
-    # 1) 保存最优 downstream head
-    torch.save(best_state,
-               os.path.join(output_dir, f"downstream_{property_name}.pt"))
-
-    # 2) 保存微调后的 encoder
-    torch.save(encoder.state_dict(),
-               os.path.join(output_dir, f"encoder_ft_{property_name}.pt"))
-
-    # 3) 保存微调后的 predictor
-    torch.save(predictor.state_dict(),
-               os.path.join(output_dir, f"predictor_ft_{property_name}.pt"))
-
-    print(f"Saved head & encoder & predictor for {property_name} in {output_dir}")
+    torch.save(best_state, os.path.join(output_dir, f"downstream_{property_name}.pt"))
+    torch.save(encoder.state_dict(), os.path.join(output_dir, f"encoder_ft_{property_name}.pt"))
+    torch.save(predictor.state_dict(), os.path.join(output_dir, f"predictor_ft_{property_name}.pt"))
+    print(f"✅ Saved head & encoder & predictor for {property_name} in {output_dir}")
 
 
 def main(paths=None):
