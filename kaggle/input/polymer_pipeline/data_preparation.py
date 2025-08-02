@@ -318,6 +318,45 @@ def validate_graph(smiles, x, edge_index, edge_attr):
         adj_graph[u,v] = 1
     if not np.array_equal(adj_rd, adj_graph):
         raise AssertionError(f"Adjacency mismatch for {smiles}")
+
+from data_preparation import smiles_to_data
+
+def predict_for_smiles(smiles: str) -> dict:
+    """
+    对一个 SMILES 字符串预测所有属性，返回 {property: value}
+    """
+    if not _model_cache:
+        for prop in PROPERTIES:
+            # 加载权重
+            enc = WDMPNN(9, 4, BEST_PARAMS["hidden_dim"], BEST_PARAMS["num_edge_layers"]).to(DEVICE)
+            enc.load_state_dict(torch.load(f"{STAGE3_DIR}/encoder_ft_{prop}.pt", map_location=DEVICE))
+            enc.eval()
+
+            pred = GraphPredictor(BEST_PARAMS["hidden_dim"], [BEST_PARAMS["hidden_dim"] // 2], 1).to(DEVICE)
+            pred.load_state_dict(torch.load(f"{STAGE3_DIR}/predictor_ft_{prop}.pt", map_location=DEVICE))
+            pred.eval()
+
+            down = torch.load(f"{STAGE3_DIR}/downstream_{prop}.pt", map_location=DEVICE).to(DEVICE)
+            down.eval()
+
+            _model_cache[prop] = (enc, pred, down)
+
+    # 预处理单个分子
+    data = smiles_to_data(smiles)
+    data = data.to(DEVICE)
+    batch = torch.zeros(data.x.shape[0], dtype=torch.long).to(DEVICE)
+
+    results = {}
+    for prop in PROPERTIES:
+        encoder, predictor, downstream = _model_cache[prop]
+        with torch.no_grad():
+            h = encoder(data.x, data.edge_index, data.edge_attr,
+                        torch.ones(data.edge_attr.size(0), device=DEVICE), batch)
+            h = predictor(h).view(-1, 1)
+            out = downstream(h)
+            results[prop] = out.item()
+
+    return results
     
 
 if __name__ == "__main__":

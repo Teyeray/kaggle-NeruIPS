@@ -10,6 +10,25 @@ from data_preparation import PolymerDataset
 
 from data_preparation import load_and_split_data, smiles_to_data, get_data_paths
 
+def load_stage3_models(prop: str):
+    """加载某个属性的 encoder, predictor, downstream"""
+    enc = WDMPNN(9, 4, BEST_PARAMS["hidden_dim"], BEST_PARAMS["num_edge_layers"]).to(DEVICE)
+    enc.load_state_dict(torch.load(f"{STAGE3_DIR}/encoder_ft_{prop}.pt", map_location=DEVICE))
+    enc.eval()
+
+    pred = GraphPredictor(BEST_PARAMS["hidden_dim"], [BEST_PARAMS["hidden_dim"] // 2], 1).to(DEVICE)
+    pred.load_state_dict(torch.load(f"{STAGE3_DIR}/predictor_ft_{prop}.pt", map_location=DEVICE))
+    pred.eval()
+
+    down = nn.Sequential(
+        nn.Linear(1, 32),
+        nn.ReLU(),
+        nn.Linear(32, 1)
+    ).to(DEVICE)
+    down.load_state_dict(torch.load(f"{STAGE3_DIR}/downstream_{prop}.pt", map_location=DEVICE))
+    down.eval()
+
+    return enc, pred, down
 def prepare_property_datasets(properties, train_df, val_df, test_df):
     """
     加载原始 train/val/test，并为每个属性返回清洗好的 DataFrame。
